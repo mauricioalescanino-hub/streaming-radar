@@ -126,6 +126,10 @@
               ✅ Só regulada Ancine (CPB)
             </label>
             <label class="text-xs text-slate-400 flex items-center gap-2 cursor-pointer select-none">
+              <input id="f-pipe" type="checkbox" class="accent-indigo-500">
+              🔮 Só com pipeline futuro
+            </label>
+            <label class="text-xs text-slate-400 flex items-center gap-2 cursor-pointer select-none">
               <input id="f-inprod" type="checkbox" class="accent-indigo-500">
               🔥 Só com séries em produção
             </label>
@@ -225,6 +229,7 @@ const state = {
     inProd: false,
     soTel: false,
     soCpb: false,
+    soPipe: false,
     responsavel: "",
     statusCrm: "",
     sort: "score",
@@ -502,6 +507,11 @@ function bindFilters() {
     state.visibleCount = PAGE_SIZE;
     render();
   });
+  document.getElementById("f-pipe").addEventListener("change", (e) => {
+    state.filters.soPipe = e.target.checked;
+    state.visibleCount = PAGE_SIZE;
+    render();
+  });
   document.getElementById("f-resp").addEventListener("change", (e) => {
     state.filters.responsavel = e.target.value;
     state.visibleCount = PAGE_SIZE;
@@ -549,7 +559,7 @@ function getFilteredObraIds(produtoraId, selectedPlatIds) {
 }
 
 function computeStatsFromObraIds(obraIds) {
-  let filmes = 0, series = 0, recentes = 0, inProd = 0, cpb = 0;
+  let filmes = 0, series = 0, recentes = 0, inProd = 0, cpb = 0, pipe = 0;
   for (const oid of obraIds) {
     const o = state.obrasById.get(oid);
     if (!o) continue;
@@ -557,8 +567,9 @@ function computeStatsFromObraIds(obraIds) {
     else { series++; if (o.in_production) inProd++; }
     if ((o.ano_lancamento || 0) >= 2023) recentes++;
     if (o.ancine_cpb) cpb++;
+    if (o.is_upcoming) pipe++;
   }
-  return { total: obraIds.length, filmes, series, recentes, inProd, cpb };
+  return { total: obraIds.length, filmes, series, recentes, inProd, cpb, pipe };
 }
 
 // =========================================================================
@@ -610,6 +621,11 @@ function applyFilters() {
   // só regulada Ancine
   if (state.filters.soCpb) {
     arr = arr.filter(p => (p.qtd_obras_com_cpb || 0) > 0);
+  }
+
+  // só com pipeline futuro
+  if (state.filters.soPipe) {
+    arr = arr.filter(p => (p.qtd_pipeline || 0) > 0);
   }
 
   // responsável CRM
@@ -714,6 +730,7 @@ function cardHTML(p, selPlatIds, filterLabel) {
       recentes: p.qtd_recentes || 0,
       inProd: p.qtd_in_production || 0,
       cpb: p.qtd_obras_com_cpb || 0,
+      pipe: p.qtd_pipeline || 0,
     };
     scopeNote = "";
   }
@@ -738,11 +755,12 @@ function cardHTML(p, selPlatIds, filterLabel) {
         </div>
       </div>
       ${scopeNote}
-      <div class="flex items-center gap-4 text-xs text-slate-400 mb-2 mt-2">
+      <div class="flex items-center gap-4 text-xs text-slate-400 mb-2 mt-2 flex-wrap">
         <span>🎬 <b class="text-slate-200">${stats.filmes}</b> filmes</span>
         <span>📺 <b class="text-slate-200">${stats.series}</b> séries</span>
         <span>📅 <b class="text-slate-200">${stats.recentes}</b> 2023+</span>
         ${stats.inProd ? `<span class="text-orange-300">🔥 <b>${stats.inProd}</b> em produção</span>` : ""}
+        ${stats.pipe ? `<span class="text-purple-300">🔮 <b>${stats.pipe}</b> pipeline</span>` : ""}
       </div>
       ${(telLink || cnpjStr || p.responsavel) ? `<div class="flex items-center gap-3 text-xs mb-2">
         ${telLink}
@@ -798,8 +816,9 @@ function openModal(pid) {
       ${p.email ? `<a href="mailto:${escapeHTML(p.email)}" class="text-emerald-300 hover:text-emerald-200">✉ ${escapeHTML(p.email)}</a>` : ""}
     </div>`;
 
-  const filmes = obras.filter(o => o.tipo === "filme");
-  const series = obras.filter(o => o.tipo === "serie");
+  const filmes = obras.filter(o => o.tipo === "filme" && !o.is_upcoming);
+  const series = obras.filter(o => o.tipo === "serie" && !o.is_upcoming);
+  const pipeline = obras.filter(o => o.is_upcoming);
 
   const body = document.getElementById("modal-body");
   const statusOptions = Object.entries(STATUS_CRM_LABELS).map(([k, v]) =>
@@ -857,6 +876,8 @@ function openModal(pid) {
         </button>
       </div>
     </div>
+    ${pipeline.length > 0 ? `<h3 class="text-sm font-semibold text-purple-300 uppercase tracking-wide mt-4">🔮 Pipeline futuro — sem plataforma definida (${pipeline.length})</h3>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">${pipeline.map(obraRowHTML).join("")}</div>` : ""}
     ${series.length > 0 ? `<h3 class="text-sm font-semibold text-slate-300 uppercase tracking-wide mt-4">Séries (${series.length})</h3>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">${series.map(obraRowHTML).join("")}</div>` : ""}
     ${filmes.length > 0 ? `<h3 class="text-sm font-semibold text-slate-300 uppercase tracking-wide mt-4">Filmes (${filmes.length})</h3>
@@ -920,7 +941,7 @@ function obraRowHTML(o) {
       ${o.poster_path ? `<img src="${TMDB_IMG}${o.poster_path}" class="w-12 h-18 object-cover rounded shrink-0" loading="lazy">` : `<div class="w-12 h-18 bg-slate-800 rounded shrink-0 flex items-center justify-center text-slate-600 text-xs">${o.tipo === "serie" ? "📺" : "🎬"}</div>`}
       <div class="flex-1 min-w-0">
         <div class="text-sm font-medium truncate">${escapeHTML(o.titulo || "(sem título)")}</div>
-        <div class="text-xs text-slate-400 mt-0.5">${o.ano_lancamento || "?"} ${o.tipo === "serie" && o.in_production ? "• 🔥 em produção" : ""}${o.tipo === "serie" && o.qtd_temporadas ? ` • ${o.qtd_temporadas}T ${o.qtd_episodios || "?"}ep` : ""}</div>
+        <div class="text-xs text-slate-400 mt-0.5">${o.ano_lancamento || "?"}${o.is_upcoming ? ` <span class="text-purple-300">• 🔮 pipeline</span>` : ""}${o.tipo === "serie" && o.in_production ? " • 🔥 em produção" : ""}${o.tipo === "serie" && o.qtd_temporadas ? ` • ${o.qtd_temporadas}T ${o.qtd_episodios || "?"}ep` : ""}</div>
         <div class="flex flex-wrap gap-1 mt-1">
           ${cpbBadge}
           ${platNomes.slice(0, 4).map(n => `<span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700">${escapeHTML(n)}</span>`).join("")}
