@@ -1,0 +1,943 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Streaming Radar — ETC Filmes</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
+  .scrollbar-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+  .scrollbar-thin::-webkit-scrollbar-track { background: #1e293b; }
+  .scrollbar-thin::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: #64748b; }
+  .badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 9999px; font-size: 11px; font-weight: 500; }
+  .card-hover:hover { transform: translateY(-2px); box-shadow: 0 10px 25px -5px rgba(99, 102, 241, 0.2); }
+  .card-hover { transition: all 0.18s ease; cursor: pointer; }
+  .modal-backdrop { backdrop-filter: blur(4px); }
+  .pulse-ring { animation: pulse-ring 1.5s ease-in-out infinite; }
+  @keyframes pulse-ring { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+</style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+
+<!-- ====================== LOGIN SCREEN ====================== -->
+<div id="login-screen" class="fixed inset-0 z-50 bg-slate-950 flex items-center justify-center">
+  <div class="max-w-sm w-full p-8">
+    <div class="text-center mb-8">
+      <div class="text-5xl mb-3">📡</div>
+      <h1 class="text-2xl font-bold tracking-tight">Streaming Radar</h1>
+      <p class="text-slate-400 text-sm mt-1">ETC Filmes — Prospecção comercial</p>
+    </div>
+    <form id="login-form" class="space-y-4">
+      <input id="login-pwd" type="password" placeholder="Senha"
+        class="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 focus:outline-none focus:border-indigo-500 transition">
+      <button type="submit"
+        class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-medium py-3 rounded-lg transition">
+        Entrar
+      </button>
+      <p id="login-err" class="text-red-400 text-sm text-center hidden">Senha incorreta</p>
+    </form>
+  </div>
+</div>
+
+<!-- ====================== APP ====================== -->
+<div id="app" class="hidden">
+
+  <!-- HEADER -->
+  <header class="border-b border-slate-800 bg-slate-900/50 backdrop-blur sticky top-0 z-30">
+    <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="text-2xl">📡</div>
+        <div>
+          <h1 class="text-lg font-bold tracking-tight">Streaming Radar</h1>
+          <p class="text-xs text-slate-400">ETC Filmes</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <span id="header-status" class="text-xs text-slate-400">Carregando...</span>
+        <button onclick="logout()" class="text-xs text-slate-400 hover:text-slate-200 px-3 py-1.5 rounded border border-slate-700 hover:border-slate-500 transition">
+          Sair
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-6 py-6">
+
+    <!-- METRICS -->
+    <section id="metrics" class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6"></section>
+
+    <!-- FILTERS -->
+    <section class="bg-slate-900 border border-slate-800 rounded-xl p-4 mb-6 space-y-4">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div>
+          <label class="text-xs text-slate-400 mb-1 block">Buscar produtora</label>
+          <input id="f-search" type="search" placeholder="Nome..."
+            class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500">
+        </div>
+        <div>
+          <label class="text-xs text-slate-400 mb-1 block">Tipo</label>
+          <select id="f-tipo" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500">
+            <option value="prospects">⭐ Prospects (exclui financiadores)</option>
+            <option value="todos">Todos</option>
+            <option value="produtora">Só produtoras</option>
+            <option value="distribuidora">Distribuidoras</option>
+            <option value="emissora">Emissoras</option>
+            <option value="plataforma">Plataformas</option>
+            <option value="major_inhouse">Majors / in-house</option>
+            <option value="financiador">Financiadores</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs text-slate-400 mb-1 block">Atividade recente</label>
+          <select id="f-ano" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500">
+            <option value="0">Qualquer</option>
+            <option value="recente">Com obras 2023+</option>
+          </select>
+        </div>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div>
+          <label class="text-xs text-slate-400 mb-1 block">Responsável CRM</label>
+          <select id="f-resp" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500">
+            <option value="">Todos</option>
+            <option value="__sem__">— sem responsável —</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs text-slate-400 mb-1 block">Status CRM</label>
+          <select id="f-status" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500">
+            <option value="">Todos</option>
+          </select>
+        </div>
+      </div>
+      <div>
+        <div class="flex items-center justify-between mb-2">
+          <label class="text-xs text-slate-400">Plataformas (clique para filtrar — múltipla)</label>
+          <div class="flex items-center gap-4 flex-wrap">
+            <label class="text-xs text-slate-400 flex items-center gap-2 cursor-pointer select-none">
+              <input id="f-tel" type="checkbox" class="accent-indigo-500">
+              📞 Só com telefone
+            </label>
+            <label class="text-xs text-slate-400 flex items-center gap-2 cursor-pointer select-none">
+              <input id="f-cpb" type="checkbox" class="accent-indigo-500">
+              ✅ Só regulada Ancine (CPB)
+            </label>
+            <label class="text-xs text-slate-400 flex items-center gap-2 cursor-pointer select-none">
+              <input id="f-inprod" type="checkbox" class="accent-indigo-500">
+              🔥 Só com séries em produção
+            </label>
+          </div>
+        </div>
+        <div id="f-plataformas" class="flex flex-wrap gap-2"></div>
+      </div>
+      <div>
+        <label class="text-xs text-slate-400 mb-2 block">UF (clique para filtrar — múltipla)</label>
+        <div id="f-ufs" class="flex flex-wrap gap-2"></div>
+      </div>
+    </section>
+
+    <!-- RESULTS HEADER -->
+    <div class="flex items-center justify-between mb-3">
+      <p id="results-count" class="text-sm text-slate-400">—</p>
+      <select id="f-sort" class="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-sm">
+        <option value="score">Ordenar por score</option>
+        <option value="obras">Por nº de obras</option>
+        <option value="nome">Alfabético</option>
+      </select>
+    </div>
+
+    <!-- CARDS GRID -->
+    <section id="produtoras-grid" class="grid grid-cols-1 lg:grid-cols-2 gap-3"></section>
+
+    <!-- LOAD MORE -->
+    <div class="text-center mt-6">
+      <button id="load-more" class="hidden px-6 py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-sm transition">
+        Carregar mais
+      </button>
+    </div>
+
+  </main>
+</div>
+
+<!-- ====================== MODAL ====================== -->
+<div id="modal" class="hidden fixed inset-0 z-40 modal-backdrop bg-black/60 flex items-center justify-center p-4">
+  <div class="bg-slate-900 border border-slate-700 rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col shadow-2xl">
+    <div class="flex items-start justify-between p-6 border-b border-slate-800">
+      <div id="modal-header"></div>
+      <button onclick="closeModal()" class="text-slate-400 hover:text-white text-xl leading-none ml-4">✕</button>
+    </div>
+    <div id="modal-body" class="overflow-y-auto scrollbar-thin p-6 space-y-4"></div>
+  </div>
+</div>
+
+<script>
+// =========================================================================
+// CONFIG
+// =========================================================================
+const SUPABASE_URL = "https://dckvqweuinsgadhkkjqx.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRja3Zxd2V1aW5zZ2FkaGtranF4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcwMjExMzAsImV4cCI6MjA5MjU5NzEzMH0.ad4dQWm33fZMUKu4jJkcbBcLvr2FUcXW-ztril7rvd8";
+const APP_PASSWORD = "etcfilmes#2026";
+// 👇 Atualize esta URL pra apontar pro seu projeto Vercel
+const PROXY_URL = "https://etc-filmes-proxy.vercel.app";
+const TMDB_IMG = "https://image.tmdb.org/t/p/w200";
+const PAGE_SIZE = 24;
+
+const RESPONSAVEIS = ["Mauricio", "Fabriccio", "Daniela", "Hunter", "Marketing"];
+
+const STATUS_CRM_LABELS = {
+  nao:              { label: "Não contatado", color: "bg-slate-500/15 text-slate-300 border-slate-500/30" },
+  tentando:         { label: "Tentando contato", color: "bg-amber-500/15 text-amber-300 border-amber-500/30" },
+  em_contato:       { label: "Em contato", color: "bg-blue-500/15 text-blue-300 border-blue-500/30" },
+  qualificado:      { label: "Qualificado", color: "bg-cyan-500/15 text-cyan-300 border-cyan-500/30" },
+  proposta:         { label: "Proposta enviada", color: "bg-violet-500/15 text-violet-300 border-violet-500/30" },
+  negociacao:       { label: "Em negociação", color: "bg-fuchsia-500/15 text-fuchsia-300 border-fuchsia-500/30" },
+  cliente:          { label: "Cliente 🎉", color: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30" },
+  nao_qualificado:  { label: "Não qualificado", color: "bg-rose-500/15 text-rose-300 border-rose-500/30" },
+  sem_resposta:     { label: "Sem resposta", color: "bg-slate-500/15 text-slate-400 border-slate-500/30" },
+};
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// =========================================================================
+// STATE
+// =========================================================================
+const state = {
+  produtoras: [],        // todas
+  obras: [],
+  plataformas: [],
+  obraProdutora: [],     // bridges
+  obraPlataforma: [],
+  // indices
+  obrasById: new Map(),
+  plataformasById: new Map(),
+  obrasPorProdutora: new Map(),    // produtora_id -> [obra_id]
+  plataformasPorObra: new Map(),   // obra_id -> [plataforma_id (flatrate principal)]
+  // filter state
+  filters: {
+    search: "",
+    tipo: "prospects",
+    ano: "0",
+    plataformas: new Set(),
+    ufs: new Set(),
+    inProd: false,
+    soTel: false,
+    soCpb: false,
+    responsavel: "",
+    statusCrm: "",
+    sort: "score",
+  },
+  visibleCount: PAGE_SIZE,
+};
+
+// =========================================================================
+// LOGIN
+// =========================================================================
+document.getElementById("login-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const pwd = document.getElementById("login-pwd").value;
+  if (pwd === APP_PASSWORD) {
+    sessionStorage.setItem("sr_auth", "1");
+    showApp();
+  } else {
+    document.getElementById("login-err").classList.remove("hidden");
+  }
+});
+function showApp() {
+  document.getElementById("login-screen").style.display = "none";
+  document.getElementById("app").classList.remove("hidden");
+  loadData();
+}
+function logout() {
+  sessionStorage.removeItem("sr_auth");
+  location.reload();
+}
+if (sessionStorage.getItem("sr_auth") === "1") showApp();
+
+// =========================================================================
+// DATA LOAD (todas as tabelas de uma vez)
+// =========================================================================
+async function fetchAll(table, columns = "*") {
+  // PostgREST limita 1000 por request — paginamos manualmente
+  const out = [];
+  let from = 0;
+  const step = 1000;
+  while (true) {
+    const { data, error } = await sb.from(table).select(columns).range(from, from + step - 1);
+    if (error) throw error;
+    out.push(...data);
+    if (data.length < step) break;
+    from += step;
+  }
+  return out;
+}
+
+async function loadData() {
+  const status = document.getElementById("header-status");
+  status.textContent = "Carregando dados...";
+  status.classList.add("pulse-ring");
+  try {
+    const [produtoras, obras, plataformas, op, opl] = await Promise.all([
+      fetchAll("streaming_produtoras"),
+      fetchAll("streaming_obras"),
+      fetchAll("streaming_plataformas"),
+      fetchAll("streaming_obra_produtora"),
+      fetchAll("streaming_obra_plataforma"),
+    ]);
+    state.produtoras = produtoras;
+    state.obras = obras;
+    state.plataformas = plataformas;
+    state.obraProdutora = op;
+    state.obraPlataforma = opl;
+    buildIndexes();
+    renderMetrics();
+    renderPlatformChips();
+    renderUfChips();
+    populateCrmFilters();
+    bindFilters();
+    render();
+    status.classList.remove("pulse-ring");
+    status.textContent = `${produtoras.length} produtoras • ${obras.length} obras`;
+  } catch (e) {
+    status.classList.remove("pulse-ring");
+    status.textContent = "Erro ao carregar";
+    console.error(e);
+    alert("Erro carregando dados:\n\n" + (e.message || e));
+  }
+}
+
+function buildIndexes() {
+  state.obrasById = new Map(state.obras.map(o => [o.id, o]));
+  state.plataformasById = new Map(state.plataformas.map(p => [p.id, p]));
+  state.obrasPorProdutora.clear();
+  for (const link of state.obraProdutora) {
+    if (!state.obrasPorProdutora.has(link.produtora_id)) state.obrasPorProdutora.set(link.produtora_id, []);
+    state.obrasPorProdutora.get(link.produtora_id).push(link.obra_id);
+  }
+  state.plataformasPorObra.clear();
+  for (const link of state.obraPlataforma) {
+    if (link.tipo_oferta !== "flatrate") continue;
+    const p = state.plataformasById.get(link.plataforma_id);
+    if (!p || p.tier !== "principal") continue;
+    if (!state.plataformasPorObra.has(link.obra_id)) state.plataformasPorObra.set(link.obra_id, []);
+    state.plataformasPorObra.get(link.obra_id).push(link.plataforma_id);
+  }
+}
+
+// =========================================================================
+// METRICS
+// =========================================================================
+function renderMetrics() {
+  const totalProsp = state.produtoras.filter(p => !p.excluir_prospect && p.qtd_obras_total > 0).length;
+  const comInProd = state.produtoras.filter(p => p.qtd_in_production > 0).length;
+  const comRecentes = state.produtoras.filter(p => p.qtd_recentes > 0).length;
+
+  // top 5 plataformas
+  const platCount = new Map();
+  for (const p of state.plataformas) {
+    if (p.tier !== "principal") continue;
+    platCount.set(p.nome, 0);
+  }
+  for (const obraIds of state.obrasPorProdutora.values()) {
+    const setPlats = new Set();
+    for (const oid of obraIds) {
+      for (const pid of (state.plataformasPorObra.get(oid) || [])) {
+        const pl = state.plataformasById.get(pid);
+        if (pl) setPlats.add(pl.nome);
+      }
+    }
+    for (const n of setPlats) if (platCount.has(n)) platCount.set(n, platCount.get(n) + 1);
+  }
+  const topPlat = [...platCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, 1)[0];
+
+  const html = [
+    metricCard("🎯", "Prospects ativos", totalProsp.toLocaleString("pt-BR"), "produtoras com obras"),
+    metricCard("🔥", "Com séries em produção", comInProd.toLocaleString("pt-BR"), "pipeline futuro"),
+    metricCard("📅", "Ativas em 2023+", comRecentes.toLocaleString("pt-BR"), "produção recente"),
+    metricCard("📺", "Plataforma líder", topPlat ? topPlat[0] : "—", topPlat ? `${topPlat[1]} produtoras` : ""),
+  ].join("");
+  document.getElementById("metrics").innerHTML = html;
+}
+
+function metricCard(icon, label, value, sub) {
+  return `
+    <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+      <div class="flex items-start justify-between mb-1">
+        <span class="text-2xl">${icon}</span>
+      </div>
+      <div class="text-2xl font-bold mt-1">${value}</div>
+      <div class="text-xs text-slate-400 mt-0.5">${label}</div>
+      <div class="text-xs text-slate-500 mt-1">${sub}</div>
+    </div>`;
+}
+
+// =========================================================================
+// PLATFORM CHIPS
+// =========================================================================
+function renderPlatformChips() {
+  // ordena por obras (descendente)
+  const platObras = new Map();
+  for (const link of state.obraPlataforma) {
+    if (link.tipo_oferta !== "flatrate") continue;
+    platObras.set(link.plataforma_id, (platObras.get(link.plataforma_id) || 0) + 1);
+  }
+  const list = state.plataformas
+    .filter(p => p.tier === "principal")
+    .map(p => ({ ...p, obras: platObras.get(p.id) || 0 }))
+    .sort((a, b) => b.obras - a.obras);
+  const wrap = document.getElementById("f-plataformas");
+  wrap.innerHTML = list.map(p => `
+    <button data-plat-id="${p.id}" data-plat-nome="${p.nome.replace(/"/g, '&quot;')}"
+      class="plat-chip px-3 py-1.5 rounded-full text-xs border border-slate-700 bg-slate-950 hover:border-slate-500 transition">
+      ${p.nome} <span class="text-slate-500">${p.obras}</span>
+    </button>
+  `).join("");
+  wrap.querySelectorAll(".plat-chip").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const nome = btn.dataset.platNome;
+      if (state.filters.plataformas.has(nome)) {
+        state.filters.plataformas.delete(nome);
+        btn.classList.remove("bg-indigo-600", "border-indigo-500", "text-white");
+        btn.classList.add("bg-slate-950");
+      } else {
+        state.filters.plataformas.add(nome);
+        btn.classList.add("bg-indigo-600", "border-indigo-500", "text-white");
+        btn.classList.remove("bg-slate-950");
+      }
+      state.visibleCount = PAGE_SIZE;
+      render();
+    });
+  });
+}
+
+// =========================================================================
+// UF CHIPS
+// =========================================================================
+function renderUfChips() {
+  const ufCount = new Map();
+  for (const p of state.produtoras) {
+    if (p.excluir_prospect || !p.qtd_obras_total) continue;
+    const uf = (p.uf || "").toUpperCase();
+    if (!uf) continue;
+    ufCount.set(uf, (ufCount.get(uf) || 0) + 1);
+  }
+  const list = [...ufCount.entries()].sort((a, b) => b[1] - a[1]);
+  const wrap = document.getElementById("f-ufs");
+  wrap.innerHTML = list.map(([uf, n]) => `
+    <button data-uf="${uf}" class="uf-chip px-3 py-1.5 rounded-full text-xs border border-slate-700 bg-slate-950 hover:border-slate-500 transition">
+      ${uf} <span class="text-slate-500">${n}</span>
+    </button>
+  `).join("");
+  wrap.querySelectorAll(".uf-chip").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const uf = btn.dataset.uf;
+      if (state.filters.ufs.has(uf)) {
+        state.filters.ufs.delete(uf);
+        btn.classList.remove("bg-indigo-600", "border-indigo-500", "text-white");
+        btn.classList.add("bg-slate-950");
+      } else {
+        state.filters.ufs.add(uf);
+        btn.classList.add("bg-indigo-600", "border-indigo-500", "text-white");
+        btn.classList.remove("bg-slate-950");
+      }
+      state.visibleCount = PAGE_SIZE;
+      render();
+    });
+  });
+}
+
+// =========================================================================
+// CRM FILTERS — popula opcoes de responsavel e status
+// =========================================================================
+function populateCrmFilters() {
+  const respSelect = document.getElementById("f-resp");
+  for (const r of RESPONSAVEIS) {
+    const opt = document.createElement("option");
+    opt.value = r;
+    opt.textContent = r;
+    respSelect.appendChild(opt);
+  }
+  const statusSelect = document.getElementById("f-status");
+  for (const [k, v] of Object.entries(STATUS_CRM_LABELS)) {
+    const opt = document.createElement("option");
+    opt.value = k;
+    opt.textContent = v.label;
+    statusSelect.appendChild(opt);
+  }
+}
+
+// =========================================================================
+// FILTER BINDINGS
+// =========================================================================
+function bindFilters() {
+  document.getElementById("f-search").addEventListener("input", (e) => {
+    state.filters.search = e.target.value.toLowerCase().trim();
+    state.visibleCount = PAGE_SIZE;
+    render();
+  });
+  document.getElementById("f-tipo").addEventListener("change", (e) => {
+    state.filters.tipo = e.target.value;
+    state.visibleCount = PAGE_SIZE;
+    render();
+  });
+  document.getElementById("f-ano").addEventListener("change", (e) => {
+    state.filters.ano = e.target.value;
+    state.visibleCount = PAGE_SIZE;
+    render();
+  });
+  document.getElementById("f-inprod").addEventListener("change", (e) => {
+    state.filters.inProd = e.target.checked;
+    state.visibleCount = PAGE_SIZE;
+    render();
+  });
+  document.getElementById("f-tel").addEventListener("change", (e) => {
+    state.filters.soTel = e.target.checked;
+    state.visibleCount = PAGE_SIZE;
+    render();
+  });
+  document.getElementById("f-cpb").addEventListener("change", (e) => {
+    state.filters.soCpb = e.target.checked;
+    state.visibleCount = PAGE_SIZE;
+    render();
+  });
+  document.getElementById("f-resp").addEventListener("change", (e) => {
+    state.filters.responsavel = e.target.value;
+    state.visibleCount = PAGE_SIZE;
+    render();
+  });
+  document.getElementById("f-status").addEventListener("change", (e) => {
+    state.filters.statusCrm = e.target.value;
+    state.visibleCount = PAGE_SIZE;
+    render();
+  });
+  document.getElementById("f-sort").addEventListener("change", (e) => {
+    state.filters.sort = e.target.value;
+    render();
+  });
+  document.getElementById("load-more").addEventListener("click", () => {
+    state.visibleCount += PAGE_SIZE;
+    render();
+  });
+}
+
+// =========================================================================
+// PLATFORM-AWARE STATS
+// Quando ha filtro de plataforma ativo, stats das produtoras refletem so
+// as obras nas plataformas selecionadas (e nao o total absoluto).
+// =========================================================================
+function hasActivePlatformFilter() {
+  return state.filters.plataformas.size > 0;
+}
+
+function getSelectedPlatformIds() {
+  const ids = new Set();
+  for (const p of state.plataformas) {
+    if (state.filters.plataformas.has(p.nome)) ids.add(p.id);
+  }
+  return ids;
+}
+
+function getFilteredObraIds(produtoraId, selectedPlatIds) {
+  const all = state.obrasPorProdutora.get(produtoraId) || [];
+  if (!selectedPlatIds || selectedPlatIds.size === 0) return all;
+  return all.filter(oid => {
+    const platIds = state.plataformasPorObra.get(oid) || [];
+    return platIds.some(pid => selectedPlatIds.has(pid));
+  });
+}
+
+function computeStatsFromObraIds(obraIds) {
+  let filmes = 0, series = 0, recentes = 0, inProd = 0, cpb = 0;
+  for (const oid of obraIds) {
+    const o = state.obrasById.get(oid);
+    if (!o) continue;
+    if (o.tipo === "filme") filmes++;
+    else { series++; if (o.in_production) inProd++; }
+    if ((o.ano_lancamento || 0) >= 2023) recentes++;
+    if (o.ancine_cpb) cpb++;
+  }
+  return { total: obraIds.length, filmes, series, recentes, inProd, cpb };
+}
+
+// =========================================================================
+// FILTER + SORT
+// =========================================================================
+function applyFilters() {
+  let arr = state.produtoras.slice();
+
+  // tipo
+  if (state.filters.tipo === "prospects") {
+    arr = arr.filter(p => !p.excluir_prospect && p.qtd_obras_total > 0);
+  } else if (state.filters.tipo !== "todos") {
+    arr = arr.filter(p => p.tipo === state.filters.tipo);
+  }
+
+  // search
+  if (state.filters.search) {
+    arr = arr.filter(p => (p.nome || "").toLowerCase().includes(state.filters.search));
+  }
+
+  // ano
+  if (state.filters.ano === "recente") {
+    arr = arr.filter(p => (p.qtd_recentes || 0) > 0);
+  }
+
+  // in production
+  if (state.filters.inProd) {
+    arr = arr.filter(p => (p.qtd_in_production || 0) > 0);
+  }
+
+  // plataformas (multi: presente em pelo menos uma selecionada)
+  if (state.filters.plataformas.size > 0) {
+    arr = arr.filter(p => {
+      const list = p.plataformas_atuantes || [];
+      return list.some(n => state.filters.plataformas.has(n));
+    });
+  }
+
+  // UFs (multi)
+  if (state.filters.ufs.size > 0) {
+    arr = arr.filter(p => state.filters.ufs.has((p.uf || "").toUpperCase()));
+  }
+
+  // só com telefone
+  if (state.filters.soTel) {
+    arr = arr.filter(p => p.telefone);
+  }
+
+  // só regulada Ancine
+  if (state.filters.soCpb) {
+    arr = arr.filter(p => (p.qtd_obras_com_cpb || 0) > 0);
+  }
+
+  // responsável CRM
+  if (state.filters.responsavel === "__sem__") {
+    arr = arr.filter(p => !p.responsavel);
+  } else if (state.filters.responsavel) {
+    arr = arr.filter(p => p.responsavel === state.filters.responsavel);
+  }
+
+  // status CRM
+  if (state.filters.statusCrm) {
+    arr = arr.filter(p => (p.status_crm || "nao") === state.filters.statusCrm);
+  }
+
+  // sort
+  if (state.filters.sort === "score") {
+    arr.sort((a, b) => (b.score_oportunidade || 0) - (a.score_oportunidade || 0));
+  } else if (state.filters.sort === "obras") {
+    if (hasActivePlatformFilter()) {
+      const selIds = getSelectedPlatformIds();
+      const countCache = new Map();
+      const cnt = p => {
+        if (!countCache.has(p.id)) countCache.set(p.id, getFilteredObraIds(p.id, selIds).length);
+        return countCache.get(p.id);
+      };
+      arr.sort((a, b) => cnt(b) - cnt(a));
+    } else {
+      arr.sort((a, b) => (b.qtd_obras_total || 0) - (a.qtd_obras_total || 0));
+    }
+  } else {
+    arr.sort((a, b) => (a.nome || "").localeCompare(b.nome || "", "pt-BR"));
+  }
+
+  return arr;
+}
+
+// =========================================================================
+// RENDER
+// =========================================================================
+function render() {
+  const arr = applyFilters();
+  const total = arr.length;
+  const visible = arr.slice(0, state.visibleCount);
+  const selPlatIds = hasActivePlatformFilter() ? getSelectedPlatformIds() : null;
+  const filterLabel = selPlatIds ? [...state.filters.plataformas].join(", ") : "";
+  const grid = document.getElementById("produtoras-grid");
+  grid.innerHTML = visible.map(p => cardHTML(p, selPlatIds, filterLabel)).join("");
+  // bind clicks
+  grid.querySelectorAll("[data-pid]").forEach(el => {
+    el.addEventListener("click", () => openModal(parseInt(el.dataset.pid, 10)));
+  });
+  const ctxNote = filterLabel ? ` <span class="text-indigo-300">(números na(s) plataforma(s): ${filterLabel})</span>` : "";
+  document.getElementById("results-count").innerHTML = total === 0
+    ? "Nenhuma produtora encontrada"
+    : `Mostrando ${Math.min(state.visibleCount, total)} de ${total.toLocaleString("pt-BR")}${ctxNote}`;
+  document.getElementById("load-more").classList.toggle("hidden", state.visibleCount >= total);
+}
+
+function tipoBadge(tipo) {
+  const map = {
+    produtora:      ["bg-emerald-500/15 text-emerald-300 border-emerald-500/30", "produtora"],
+    distribuidora:  ["bg-sky-500/15 text-sky-300 border-sky-500/30", "distribuidora"],
+    emissora:       ["bg-amber-500/15 text-amber-300 border-amber-500/30", "emissora"],
+    plataforma:     ["bg-violet-500/15 text-violet-300 border-violet-500/30", "plataforma"],
+    major_inhouse:  ["bg-fuchsia-500/15 text-fuchsia-300 border-fuchsia-500/30", "major"],
+    financiador:    ["bg-slate-500/15 text-slate-400 border-slate-500/30", "financiador"],
+    desconhecido:   ["bg-slate-500/15 text-slate-400 border-slate-500/30", "?"],
+  };
+  const [cls, label] = map[tipo] || map.desconhecido;
+  return `<span class="badge border ${cls}">${label}</span>`;
+}
+
+function crmBadge(status) {
+  if (!status || status === "nao") return "";
+  const cfg = STATUS_CRM_LABELS[status];
+  if (!cfg) return "";
+  return `<span class="badge border ${cfg.color}">${cfg.label}</span>`;
+}
+
+function hotBadge(score) {
+  if (score >= 100) return `<span class="badge bg-rose-500/20 text-rose-300 border border-rose-500/40">🔥 Hot prospect</span>`;
+  if (score >= 50)  return `<span class="badge bg-amber-500/20 text-amber-300 border border-amber-500/40">⭐ Warm</span>`;
+  return "";
+}
+
+function cardHTML(p, selPlatIds, filterLabel) {
+  const plats = (p.plataformas_atuantes || []).slice(0, 5);
+  const restantes = (p.plataformas_atuantes || []).length - plats.length;
+  const localStr = [p.cidade, p.uf].filter(Boolean).join("/");
+  const cnpjStr = p.cnpj ? formatCNPJ(p.cnpj) : "";
+  const telLink = p.telefone ? `<a href="tel:${(p.telefone || "").replace(/\D/g, '')}" onclick="event.stopPropagation()" class="text-emerald-300 hover:text-emerald-200">📞 ${escapeHTML(p.telefone)}</a>` : "";
+
+  // Stats: filtradas pela plataforma selecionada se ativa, senao usa os totais
+  let stats, scopeNote;
+  if (selPlatIds && selPlatIds.size > 0) {
+    stats = computeStatsFromObraIds(getFilteredObraIds(p.id, selPlatIds));
+    scopeNote = `<div class="text-[10px] text-indigo-300/80 mb-1">na(s) plataforma(s): ${escapeHTML(filterLabel)}</div>`;
+  } else {
+    stats = {
+      filmes: p.qtd_filmes || 0,
+      series: p.qtd_series || 0,
+      recentes: p.qtd_recentes || 0,
+      inProd: p.qtd_in_production || 0,
+      cpb: p.qtd_obras_com_cpb || 0,
+    };
+    scopeNote = "";
+  }
+
+  return `
+    <div data-pid="${p.id}" class="card-hover bg-slate-900 border border-slate-800 rounded-xl p-5">
+      <div class="flex items-start justify-between gap-3 mb-2">
+        <div class="flex-1 min-w-0">
+          <h3 class="font-bold text-base truncate">${escapeHTML(p.nome || "(sem nome)")}</h3>
+          <div class="flex items-center gap-2 mt-1 flex-wrap">
+            ${tipoBadge(p.tipo)}
+            ${hotBadge(p.score_oportunidade || 0)}
+            ${crmBadge(p.status_crm)}
+            ${(p.qtd_obras_com_cpb || 0) > 0 ? `<span class="badge bg-emerald-500/15 text-emerald-300 border border-emerald-500/30" title="${p.qtd_obras_com_cpb} obras com CPB Ancine">✅ Ancine ${p.qtd_obras_com_cpb}</span>` : ""}
+            ${p.origin_country && p.origin_country !== "BR" ? `<span class="badge bg-slate-700/40 text-slate-300 border border-slate-600">${p.origin_country}</span>` : ""}
+            ${localStr ? `<span class="text-xs text-slate-400">📍 ${escapeHTML(localStr)}</span>` : ""}
+          </div>
+        </div>
+        <div class="text-right shrink-0">
+          <div class="text-2xl font-bold text-indigo-400">${Math.round(p.score_oportunidade || 0)}</div>
+          <div class="text-xs text-slate-500">score</div>
+        </div>
+      </div>
+      ${scopeNote}
+      <div class="flex items-center gap-4 text-xs text-slate-400 mb-2 mt-2">
+        <span>🎬 <b class="text-slate-200">${stats.filmes}</b> filmes</span>
+        <span>📺 <b class="text-slate-200">${stats.series}</b> séries</span>
+        <span>📅 <b class="text-slate-200">${stats.recentes}</b> 2023+</span>
+        ${stats.inProd ? `<span class="text-orange-300">🔥 <b>${stats.inProd}</b> em produção</span>` : ""}
+      </div>
+      ${(telLink || cnpjStr || p.responsavel) ? `<div class="flex items-center gap-3 text-xs mb-2">
+        ${telLink}
+        ${cnpjStr ? `<span class="text-slate-500" title="CNPJ">${cnpjStr}</span>` : ""}
+        ${p.responsavel ? `<span class="text-indigo-300" title="Responsável">👤 ${escapeHTML(p.responsavel)}</span>` : ""}
+      </div>` : ""}
+      <div class="flex flex-wrap gap-1.5">
+        ${plats.map(n => `<span class="text-xs px-2 py-0.5 rounded ${state.filters.plataformas.has(n) ? "bg-indigo-600/20 border border-indigo-500/40 text-indigo-200" : "bg-slate-800 border border-slate-700"}">${escapeHTML(n)}</span>`).join("")}
+        ${restantes > 0 ? `<span class="text-xs px-2 py-0.5 rounded text-slate-500">+${restantes}</span>` : ""}
+      </div>
+    </div>`;
+}
+
+function formatCNPJ(cnpj) {
+  const c = (cnpj || "").replace(/\D/g, "");
+  if (c.length !== 14) return cnpj;
+  return `${c.slice(0,2)}.${c.slice(2,5)}.${c.slice(5,8)}/${c.slice(8,12)}-${c.slice(12)}`;
+}
+
+function escapeHTML(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+// =========================================================================
+// MODAL
+// =========================================================================
+function openModal(pid) {
+  const p = state.produtoras.find(x => x.id === pid);
+  if (!p) return;
+  const selPlatIds = hasActivePlatformFilter() ? getSelectedPlatformIds() : null;
+  const filterLabel = selPlatIds ? [...state.filters.plataformas].join(", ") : "";
+  const obraIds = getFilteredObraIds(pid, selPlatIds);
+  const obras = obraIds.map(oid => state.obrasById.get(oid)).filter(Boolean)
+    .sort((a, b) => (b.ano_lancamento || 0) - (a.ano_lancamento || 0));
+  const obrasTotaisProdutora = (state.obrasPorProdutora.get(pid) || []).length;
+
+  const local = [p.cidade, p.uf].filter(Boolean).join("/");
+  const cnpjFmt = p.cnpj ? formatCNPJ(p.cnpj) : "";
+  const telDigits = (p.telefone || "").replace(/\D/g, "");
+  document.getElementById("modal-header").innerHTML = `
+    <h2 class="text-xl font-bold mb-1">${escapeHTML(p.nome || "(sem nome)")}</h2>
+    <div class="flex items-center gap-2 flex-wrap mb-2">
+      ${tipoBadge(p.tipo)}
+      ${hotBadge(p.score_oportunidade || 0)}
+      ${(p.qtd_obras_com_cpb || 0) > 0 ? `<span class="badge bg-emerald-500/15 text-emerald-300 border border-emerald-500/30" title="${p.qtd_obras_com_cpb} obras com CPB Ancine">✅ Ancine ${p.qtd_obras_com_cpb}</span>` : ""}
+      ${p.origin_country ? `<span class="badge bg-slate-700/40 text-slate-300 border border-slate-600">${p.origin_country}</span>` : ""}
+      <span class="text-xs text-slate-400">score <b class="text-indigo-400">${Math.round(p.score_oportunidade || 0)}</b></span>
+    </div>
+    <div class="flex items-center gap-4 text-xs flex-wrap">
+      ${local ? `<span class="text-slate-400">📍 ${escapeHTML(local)}</span>` : ""}
+      ${cnpjFmt ? `<span class="text-slate-500" title="CNPJ">CNPJ ${cnpjFmt}</span>` : ""}
+      ${p.telefone ? `<a href="tel:${telDigits}" class="text-emerald-300 hover:text-emerald-200">📞 ${escapeHTML(p.telefone)}</a>` : ""}
+      ${p.email ? `<a href="mailto:${escapeHTML(p.email)}" class="text-emerald-300 hover:text-emerald-200">✉ ${escapeHTML(p.email)}</a>` : ""}
+    </div>`;
+
+  const filmes = obras.filter(o => o.tipo === "filme");
+  const series = obras.filter(o => o.tipo === "serie");
+
+  const body = document.getElementById("modal-body");
+  const statusOptions = Object.entries(STATUS_CRM_LABELS).map(([k, v]) =>
+    `<option value="${k}" ${(p.status_crm || "nao") === k ? "selected" : ""}>${v.label}</option>`
+  ).join("");
+  const inProdNoEscopo = series.filter(s => s.in_production).length;
+  body.innerHTML = `
+    ${filterLabel ? `<div class="bg-indigo-500/10 border border-indigo-500/30 rounded-lg p-3 mb-3 text-sm">
+      Mostrando <b>${obras.length}</b> de <b>${obrasTotaisProdutora}</b> obras — filtradas por: <b class="text-indigo-300">${escapeHTML(filterLabel)}</b>
+    </div>` : ""}
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
+      <div class="bg-slate-950 rounded-lg p-3 border border-slate-800"><div class="text-2xl font-bold">${obras.length}</div><div class="text-xs text-slate-400">obras${filterLabel ? " no escopo" : " totais"}</div></div>
+      <div class="bg-slate-950 rounded-lg p-3 border border-slate-800"><div class="text-2xl font-bold">${filmes.length}</div><div class="text-xs text-slate-400">filmes</div></div>
+      <div class="bg-slate-950 rounded-lg p-3 border border-slate-800"><div class="text-2xl font-bold">${series.length}</div><div class="text-xs text-slate-400">séries</div></div>
+      <div class="bg-slate-950 rounded-lg p-3 border border-slate-800"><div class="text-2xl font-bold text-orange-300">${inProdNoEscopo}</div><div class="text-xs text-slate-400">em produção</div></div>
+    </div>
+
+    <!-- CRM -->
+    <div class="bg-slate-950 border border-slate-800 rounded-xl p-4">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-sm font-semibold text-slate-300 uppercase tracking-wide">CRM</h3>
+        <span id="crm-status" class="text-xs text-slate-500"></span>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+        <div>
+          <label class="text-xs text-slate-400 mb-1 block">Status</label>
+          <select id="crm-status-select" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm">
+            ${statusOptions}
+          </select>
+        </div>
+        <div>
+          <label class="text-xs text-slate-400 mb-1 block">Responsável</label>
+          <select id="crm-responsavel" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm">
+            <option value="">— sem responsável —</option>
+            ${RESPONSAVEIS.map(r => `<option value="${r}" ${p.responsavel === r ? "selected" : ""}>${r}</option>`).join("")}
+            ${p.responsavel && !RESPONSAVEIS.includes(p.responsavel)
+              ? `<option value="${escapeHTML(p.responsavel)}" selected>${escapeHTML(p.responsavel)} (legado)</option>`
+              : ""}
+          </select>
+        </div>
+        <div>
+          <label class="text-xs text-slate-400 mb-1 block">Último contato</label>
+          <input id="crm-data" type="date" value="${p.ultimo_contato || ''}"
+            class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm">
+        </div>
+      </div>
+      <div>
+        <label class="text-xs text-slate-400 mb-1 block">Observações</label>
+        <textarea id="crm-obs" rows="3" placeholder="Anotações da conversa, próximo passo, etc."
+          class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm resize-y">${escapeHTML(p.obs || "")}</textarea>
+      </div>
+      <div class="flex items-center justify-end gap-2 mt-3">
+        <button id="crm-save" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-sm font-medium transition">
+          Salvar CRM
+        </button>
+      </div>
+    </div>
+    ${series.length > 0 ? `<h3 class="text-sm font-semibold text-slate-300 uppercase tracking-wide mt-4">Séries (${series.length})</h3>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">${series.map(obraRowHTML).join("")}</div>` : ""}
+    ${filmes.length > 0 ? `<h3 class="text-sm font-semibold text-slate-300 uppercase tracking-wide mt-4">Filmes (${filmes.length})</h3>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">${filmes.map(obraRowHTML).join("")}</div>` : ""}
+  `;
+  document.getElementById("modal").classList.remove("hidden");
+  // wire CRM
+  document.getElementById("crm-save").addEventListener("click", () => saveCrm(p));
+}
+
+async function saveCrm(p) {
+  const btn = document.getElementById("crm-save");
+  const statusEl = document.getElementById("crm-status");
+  const payload = {
+    produtora_id: p.id,
+    status_crm: document.getElementById("crm-status-select").value,
+    responsavel: document.getElementById("crm-responsavel").value || null,
+    ultimo_contato: document.getElementById("crm-data").value || null,
+    obs: document.getElementById("crm-obs").value.trim(),
+  };
+  btn.disabled = true;
+  btn.textContent = "Salvando...";
+  statusEl.textContent = "";
+  try {
+    const resp = await fetch(`${PROXY_URL}/api/crm-update`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-App-Password": APP_PASSWORD,
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${resp.status}`);
+    }
+    // update local state
+    Object.assign(p, {
+      status_crm: payload.status_crm,
+      responsavel: payload.responsavel || null,
+      ultimo_contato: payload.ultimo_contato,
+      obs: payload.obs || null,
+    });
+    statusEl.innerHTML = `<span class="text-emerald-400">✓ salvo</span>`;
+    render();  // re-render cards (badge de status pode mudar)
+    setTimeout(() => { statusEl.textContent = ""; }, 3000);
+  } catch (e) {
+    statusEl.innerHTML = `<span class="text-rose-400">erro: ${escapeHTML(String(e.message || e))}</span>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Salvar CRM";
+  }
+}
+
+function obraRowHTML(o) {
+  const platIds = state.plataformasPorObra.get(o.id) || [];
+  const platNomes = platIds.map(pid => state.plataformasById.get(pid)?.nome).filter(Boolean);
+  const cpbBadge = o.ancine_cpb ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30" title="CPB Ancine: ${escapeHTML(o.ancine_cpb)}">✅ CPB</span>` : "";
+  return `
+    <div class="bg-slate-950 border border-slate-800 rounded-lg p-3 flex gap-3">
+      ${o.poster_path ? `<img src="${TMDB_IMG}${o.poster_path}" class="w-12 h-18 object-cover rounded shrink-0" loading="lazy">` : `<div class="w-12 h-18 bg-slate-800 rounded shrink-0 flex items-center justify-center text-slate-600 text-xs">${o.tipo === "serie" ? "📺" : "🎬"}</div>`}
+      <div class="flex-1 min-w-0">
+        <div class="text-sm font-medium truncate">${escapeHTML(o.titulo || "(sem título)")}</div>
+        <div class="text-xs text-slate-400 mt-0.5">${o.ano_lancamento || "?"} ${o.tipo === "serie" && o.in_production ? "• 🔥 em produção" : ""}${o.tipo === "serie" && o.qtd_temporadas ? ` • ${o.qtd_temporadas}T ${o.qtd_episodios || "?"}ep` : ""}</div>
+        <div class="flex flex-wrap gap-1 mt-1">
+          ${cpbBadge}
+          ${platNomes.slice(0, 4).map(n => `<span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700">${escapeHTML(n)}</span>`).join("")}
+        </div>
+      </div>
+    </div>`;
+}
+
+function closeModal() {
+  document.getElementById("modal").classList.add("hidden");
+}
+document.getElementById("modal").addEventListener("click", (e) => {
+  if (e.target.id === "modal") closeModal();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeModal();
+});
+</script>
+</body>
+</html>
