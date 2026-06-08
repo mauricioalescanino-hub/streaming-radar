@@ -71,10 +71,15 @@
 
     <!-- FILTERS -->
     <section class="bg-slate-900 border border-slate-800 rounded-xl p-4 mb-6 space-y-4">
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
         <div>
           <label class="text-xs text-slate-400 mb-1 block">Buscar produtora</label>
           <input id="f-search" type="search" placeholder="Nome..."
+            class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500">
+        </div>
+        <div>
+          <label class="text-xs text-slate-400 mb-1 block">Buscar título (filme/série)</label>
+          <input id="f-title" type="search" placeholder="Ex: Tropa de Elite"
             class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500">
         </div>
         <div>
@@ -222,6 +227,7 @@ const state = {
   // filter state
   filters: {
     search: "",
+    titulo: "",
     tipo: "prospects",
     ano: "0",
     plataformas: new Set(),
@@ -482,6 +488,11 @@ function bindFilters() {
     state.visibleCount = PAGE_SIZE;
     render();
   });
+  document.getElementById("f-title").addEventListener("input", (e) => {
+    state.filters.titulo = e.target.value.toLowerCase().trim();
+    state.visibleCount = PAGE_SIZE;
+    render();
+  });
   document.getElementById("f-tipo").addEventListener("change", (e) => {
     state.filters.tipo = e.target.value;
     state.visibleCount = PAGE_SIZE;
@@ -541,6 +552,10 @@ function hasActivePlatformFilter() {
   return state.filters.plataformas.size > 0;
 }
 
+function hasActiveObraFilter() {
+  return state.filters.plataformas.size > 0 || !!state.filters.titulo;
+}
+
 function getSelectedPlatformIds() {
   const ids = new Set();
   for (const p of state.plataformas) {
@@ -549,13 +564,23 @@ function getSelectedPlatformIds() {
   return ids;
 }
 
-function getFilteredObraIds(produtoraId, selectedPlatIds) {
-  const all = state.obrasPorProdutora.get(produtoraId) || [];
-  if (!selectedPlatIds || selectedPlatIds.size === 0) return all;
-  return all.filter(oid => {
-    const platIds = state.plataformasPorObra.get(oid) || [];
-    return platIds.some(pid => selectedPlatIds.has(pid));
-  });
+function getFilteredObraIds(produtoraId, selectedPlatIds, tituloQuery) {
+  let all = state.obrasPorProdutora.get(produtoraId) || [];
+  if (selectedPlatIds && selectedPlatIds.size > 0) {
+    all = all.filter(oid => {
+      const platIds = state.plataformasPorObra.get(oid) || [];
+      return platIds.some(pid => selectedPlatIds.has(pid));
+    });
+  }
+  if (tituloQuery) {
+    all = all.filter(oid => {
+      const o = state.obrasById.get(oid);
+      if (!o) return false;
+      return (o.titulo || "").toLowerCase().includes(tituloQuery) ||
+             (o.titulo_original || "").toLowerCase().includes(tituloQuery);
+    });
+  }
+  return all;
 }
 
 function computeStatsFromObraIds(obraIds) {
@@ -628,6 +653,20 @@ function applyFilters() {
     arr = arr.filter(p => (p.qtd_pipeline || 0) > 0);
   }
 
+  // busca por título de obra: mantém produtoras com pelo menos 1 obra que casa
+  if (state.filters.titulo) {
+    const q = state.filters.titulo;
+    arr = arr.filter(p => {
+      const obraIds = state.obrasPorProdutora.get(p.id) || [];
+      return obraIds.some(oid => {
+        const o = state.obrasById.get(oid);
+        if (!o) return false;
+        return (o.titulo || "").toLowerCase().includes(q) ||
+               (o.titulo_original || "").toLowerCase().includes(q);
+      });
+    });
+  }
+
   // responsável CRM
   if (state.filters.responsavel === "__sem__") {
     arr = arr.filter(p => !p.responsavel);
@@ -670,14 +709,18 @@ function render() {
   const total = arr.length;
   const visible = arr.slice(0, state.visibleCount);
   const selPlatIds = hasActivePlatformFilter() ? getSelectedPlatformIds() : null;
-  const filterLabel = selPlatIds ? [...state.filters.plataformas].join(", ") : "";
+  const tituloQuery = state.filters.titulo || "";
+  const platLabel = selPlatIds ? [...state.filters.plataformas].join(", ") : "";
   const grid = document.getElementById("produtoras-grid");
-  grid.innerHTML = visible.map(p => cardHTML(p, selPlatIds, filterLabel)).join("");
+  grid.innerHTML = visible.map(p => cardHTML(p, selPlatIds, platLabel, tituloQuery)).join("");
   // bind clicks
   grid.querySelectorAll("[data-pid]").forEach(el => {
     el.addEventListener("click", () => openModal(parseInt(el.dataset.pid, 10)));
   });
-  const ctxNote = filterLabel ? ` <span class="text-indigo-300">(números na(s) plataforma(s): ${filterLabel})</span>` : "";
+  const ctxParts = [];
+  if (platLabel) ctxParts.push(`plataforma(s): ${platLabel}`);
+  if (tituloQuery) ctxParts.push(`título contém "${escapeHTML(tituloQuery)}"`);
+  const ctxNote = ctxParts.length ? ` <span class="text-indigo-300">(escopo: ${ctxParts.join(" · ")})</span>` : "";
   document.getElementById("results-count").innerHTML = total === 0
     ? "Nenhuma produtora encontrada"
     : `Mostrando ${Math.min(state.visibleCount, total)} de ${total.toLocaleString("pt-BR")}${ctxNote}`;
@@ -711,18 +754,22 @@ function hotBadge(score) {
   return "";
 }
 
-function cardHTML(p, selPlatIds, filterLabel) {
+function cardHTML(p, selPlatIds, platLabel, tituloQuery) {
   const plats = (p.plataformas_atuantes || []).slice(0, 5);
   const restantes = (p.plataformas_atuantes || []).length - plats.length;
   const localStr = [p.cidade, p.uf].filter(Boolean).join("/");
   const cnpjStr = p.cnpj ? formatCNPJ(p.cnpj) : "";
   const telLink = p.telefone ? `<a href="tel:${(p.telefone || "").replace(/\D/g, '')}" onclick="event.stopPropagation()" class="text-emerald-300 hover:text-emerald-200">📞 ${escapeHTML(p.telefone)}</a>` : "";
 
-  // Stats: filtradas pela plataforma selecionada se ativa, senao usa os totais
+  // Stats: filtradas se houver filtro de plataforma ou de titulo
+  const hasObraFilter = (selPlatIds && selPlatIds.size > 0) || tituloQuery;
   let stats, scopeNote;
-  if (selPlatIds && selPlatIds.size > 0) {
-    stats = computeStatsFromObraIds(getFilteredObraIds(p.id, selPlatIds));
-    scopeNote = `<div class="text-[10px] text-indigo-300/80 mb-1">na(s) plataforma(s): ${escapeHTML(filterLabel)}</div>`;
+  if (hasObraFilter) {
+    stats = computeStatsFromObraIds(getFilteredObraIds(p.id, selPlatIds, tituloQuery));
+    const parts = [];
+    if (platLabel) parts.push(`plataforma(s): ${escapeHTML(platLabel)}`);
+    if (tituloQuery) parts.push(`título contém "${escapeHTML(tituloQuery)}"`);
+    scopeNote = `<div class="text-[10px] text-indigo-300/80 mb-1">escopo: ${parts.join(" · ")}</div>`;
   } else {
     stats = {
       filmes: p.qtd_filmes || 0,
@@ -791,8 +838,12 @@ function openModal(pid) {
   const p = state.produtoras.find(x => x.id === pid);
   if (!p) return;
   const selPlatIds = hasActivePlatformFilter() ? getSelectedPlatformIds() : null;
-  const filterLabel = selPlatIds ? [...state.filters.plataformas].join(", ") : "";
-  const obraIds = getFilteredObraIds(pid, selPlatIds);
+  const tituloQuery = state.filters.titulo || "";
+  const parts = [];
+  if (selPlatIds) parts.push(`plataforma(s): ${[...state.filters.plataformas].join(", ")}`);
+  if (tituloQuery) parts.push(`título contém "${tituloQuery}"`);
+  const filterLabel = parts.join(" · ");
+  const obraIds = getFilteredObraIds(pid, selPlatIds, tituloQuery);
   const obras = obraIds.map(oid => state.obrasById.get(oid)).filter(Boolean)
     .sort((a, b) => (b.ano_lancamento || 0) - (a.ano_lancamento || 0));
   const obrasTotaisProdutora = (state.obrasPorProdutora.get(pid) || []).length;
