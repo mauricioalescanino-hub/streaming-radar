@@ -323,9 +323,18 @@ function buildIndexes() {
   state.obrasById = new Map(state.obras.map(o => [o.id, o]));
   state.plataformasById = new Map(state.plataformas.map(p => [p.id, p]));
   state.obrasPorProdutora.clear();
+  state.moskitByBridge = new Map();  // chave "produtora_id|obra_id" -> {deal_id, deal_name, sent_at}
   for (const link of state.obraProdutora) {
     if (!state.obrasPorProdutora.has(link.produtora_id)) state.obrasPorProdutora.set(link.produtora_id, []);
     state.obrasPorProdutora.get(link.produtora_id).push(link.obra_id);
+    if (link.moskit_deal_id) {
+      state.moskitByBridge.set(`${link.produtora_id}|${link.obra_id}`, {
+        deal_id: link.moskit_deal_id,
+        deal_name: link.moskit_deal_name,
+        sent_at: link.moskit_sent_at,
+        sent_by: link.moskit_sent_by,
+      });
+    }
   }
   state.plataformasPorObra.clear();
   for (const link of state.obraPlataforma) {
@@ -928,15 +937,76 @@ function openModal(pid) {
       </div>
     </div>
     ${pipeline.length > 0 ? `<h3 class="text-sm font-semibold text-purple-300 uppercase tracking-wide mt-4">🔮 Pipeline futuro — sem plataforma definida (${pipeline.length})</h3>
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">${pipeline.map(obraRowHTML).join("")}</div>` : ""}
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">${pipeline.map(o => obraRowHTML(o, p)).join("")}</div>` : ""}
     ${series.length > 0 ? `<h3 class="text-sm font-semibold text-slate-300 uppercase tracking-wide mt-4">Séries (${series.length})</h3>
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">${series.map(obraRowHTML).join("")}</div>` : ""}
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">${series.map(o => obraRowHTML(o, p)).join("")}</div>` : ""}
     ${filmes.length > 0 ? `<h3 class="text-sm font-semibold text-slate-300 uppercase tracking-wide mt-4">Filmes (${filmes.length})</h3>
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">${filmes.map(obraRowHTML).join("")}</div>` : ""}
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">${filmes.map(o => obraRowHTML(o, p)).join("")}</div>` : ""}
   `;
   document.getElementById("modal").classList.remove("hidden");
   // wire CRM
   document.getElementById("crm-save").addEventListener("click", () => saveCrm(p));
+  // wire botoes Moskit
+  document.querySelectorAll(".moskit-btn").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      sendToMoskit({
+        produtoraId: parseInt(btn.dataset.produtoraId, 10),
+        produtoraNome: btn.dataset.produtoraNome,
+        obraId: btn.dataset.obraId,
+        obraTitulo: btn.dataset.obraTitulo,
+        button: btn,
+      });
+    });
+  });
+}
+
+async function sendToMoskit({ produtoraId, produtoraNome, obraId, obraTitulo, button }) {
+  if (!confirm(`Criar deal no Moskit?\n\nNome: ${produtoraNome} — ${obraTitulo}`)) return;
+  const original = button.innerHTML;
+  button.disabled = true;
+  button.innerHTML = "...enviando";
+  try {
+    const respUser = state.produtoras.find(p => p.id === produtoraId)?.responsavel || null;
+    const resp = await fetch(`${PROXY_URL}/api/moskit-create-deal`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-App-Password": APP_PASSWORD,
+      },
+      body: JSON.stringify({
+        produtora_id: produtoraId,
+        produtora_nome: produtoraNome,
+        obra_id: obraId,
+        obra_titulo: obraTitulo,
+        sent_by: respUser,
+      }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      throw new Error(data.error || `HTTP ${resp.status}`);
+    }
+    // atualiza estado local
+    state.moskitByBridge.set(`${produtoraId}|${obraId}`, {
+      deal_id: data.moskit_deal_id,
+      deal_name: data.deal_name,
+      sent_at: new Date().toISOString(),
+      sent_by: respUser,
+    });
+    // tambem atualiza a linha do bridge no array global pra persistir entre re-renders
+    const bridge = state.obraProdutora.find(b => b.obra_id === obraId && b.produtora_id === produtoraId);
+    if (bridge) {
+      bridge.moskit_deal_id = data.moskit_deal_id;
+      bridge.moskit_deal_name = data.deal_name;
+      bridge.moskit_sent_at = new Date().toISOString();
+      bridge.moskit_sent_by = respUser;
+    }
+    button.outerHTML = `<span class="text-[10px] px-2 py-1 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30" title="Deal ${data.moskit_deal_id}">${data.already_sent ? "✓ ja estava no Moskit" : "✓ enviado!"}</span>`;
+  } catch (e) {
+    button.disabled = false;
+    button.innerHTML = original;
+    alert("Erro ao enviar ao Moskit:\n\n" + (e.message || e));
+  }
 }
 
 async function saveCrm(p) {
@@ -983,15 +1053,35 @@ async function saveCrm(p) {
   }
 }
 
-function obraRowHTML(o) {
+function obraRowHTML(o, produtora) {
   const platIds = state.plataformasPorObra.get(o.id) || [];
   const platNomes = platIds.map(pid => state.plataformasById.get(pid)?.nome).filter(Boolean);
   const cpbBadge = o.ancine_cpb ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30" title="CPB Ancine: ${escapeHTML(o.ancine_cpb)}">✅ CPB</span>` : "";
+
+  // Moskit: ja enviado?
+  const moskitKey = produtora ? `${produtora.id}|${o.id}` : null;
+  const moskitInfo = moskitKey ? state.moskitByBridge.get(moskitKey) : null;
+  const moskitBtn = produtora ? (
+    moskitInfo
+      ? `<span class="text-[10px] px-2 py-1 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30" title="Deal ${moskitInfo.deal_id} criado em ${moskitInfo.sent_at}">✓ no Moskit</span>`
+      : `<button
+           class="moskit-btn text-[10px] px-2 py-1 rounded bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-200 border border-indigo-500/40 transition"
+           data-obra-id="${escapeHTML(o.id)}"
+           data-obra-titulo="${escapeHTML(o.titulo || '')}"
+           data-produtora-id="${produtora.id}"
+           data-produtora-nome="${escapeHTML(produtora.nome || '')}">
+           📤 Moskit
+         </button>`
+  ) : "";
+
   return `
     <div class="bg-slate-950 border border-slate-800 rounded-lg p-3 flex gap-3">
       ${o.poster_path ? `<img src="${TMDB_IMG}${o.poster_path}" class="w-12 h-18 object-cover rounded shrink-0" loading="lazy">` : `<div class="w-12 h-18 bg-slate-800 rounded shrink-0 flex items-center justify-center text-slate-600 text-xs">${o.tipo === "serie" ? "📺" : "🎬"}</div>`}
       <div class="flex-1 min-w-0">
-        <div class="text-sm font-medium truncate">${escapeHTML(o.titulo || "(sem título)")}</div>
+        <div class="flex items-start justify-between gap-2">
+          <div class="text-sm font-medium truncate flex-1">${escapeHTML(o.titulo || "(sem título)")}</div>
+          ${moskitBtn}
+        </div>
         <div class="text-xs text-slate-400 mt-0.5">${o.ano_lancamento || "?"}${o.is_upcoming ? ` <span class="text-purple-300">• 🔮 pipeline</span>` : ""}${o.tipo === "serie" && o.in_production ? " • 🔥 em produção" : ""}${o.tipo === "serie" && o.qtd_temporadas ? ` • ${o.qtd_temporadas}T ${o.qtd_episodios || "?"}ep` : ""}</div>
         <div class="flex flex-wrap gap-1 mt-1">
           ${cpbBadge}
