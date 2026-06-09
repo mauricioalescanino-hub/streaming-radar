@@ -143,6 +143,10 @@
         <div id="f-plataformas" class="flex flex-wrap gap-2"></div>
       </div>
       <div>
+        <label class="text-xs text-slate-400 mb-2 block">Tipo de mídia (clique para filtrar — múltipla)</label>
+        <div id="f-midias" class="flex flex-wrap gap-2"></div>
+      </div>
+      <div>
         <label class="text-xs text-slate-400 mb-2 block">UF (clique para filtrar — múltipla)</label>
         <div id="f-ufs" class="flex flex-wrap gap-2"></div>
       </div>
@@ -232,6 +236,7 @@ const state = {
     ano: "0",
     plataformas: new Set(),
     ufs: new Set(),
+    midias: new Set(),
     inProd: false,
     soTel: false,
     soCpb: false,
@@ -305,6 +310,7 @@ async function loadData() {
     buildIndexes();
     renderMetrics();
     renderPlatformChips();
+    renderMidiaChips();
     renderUfChips();
     populateCrmFilters();
     bindFilters();
@@ -423,6 +429,52 @@ function renderPlatformChips() {
         btn.classList.add("bg-slate-950");
       } else {
         state.filters.plataformas.add(nome);
+        btn.classList.add("bg-indigo-600", "border-indigo-500", "text-white");
+        btn.classList.remove("bg-slate-950");
+      }
+      state.visibleCount = PAGE_SIZE;
+      render();
+    });
+  });
+}
+
+// =========================================================================
+// MIDIA CHIPS
+// =========================================================================
+const MIDIA_META = {
+  streaming:  { label: "📡 Streaming",  cls: "bg-indigo-500/15 text-indigo-200 border-indigo-500/40" },
+  tv_aberta:  { label: "📺 TV Aberta",  cls: "bg-rose-500/15 text-rose-200 border-rose-500/40" },
+  tv_paga:    { label: "📡 TV Paga",    cls: "bg-amber-500/15 text-amber-200 border-amber-500/40" },
+  cinema:     { label: "🎬 Cinema",     cls: "bg-emerald-500/15 text-emerald-200 border-emerald-500/40" },
+  pipeline:   { label: "🔮 Pipeline",   cls: "bg-purple-500/15 text-purple-200 border-purple-500/40" },
+};
+
+function renderMidiaChips() {
+  // conta obras por tipo
+  const cnt = new Map();
+  for (const o of state.obras) {
+    for (const t of (o.tipo_midia || [])) {
+      cnt.set(t, (cnt.get(t) || 0) + 1);
+    }
+  }
+  const order = ["streaming", "tv_aberta", "tv_paga", "cinema"];
+  const wrap = document.getElementById("f-midias");
+  wrap.innerHTML = order.map(t => {
+    const meta = MIDIA_META[t];
+    const n = cnt.get(t) || 0;
+    return `<button data-midia="${t}" class="midia-chip px-3 py-1.5 rounded-full text-xs border border-slate-700 bg-slate-950 hover:border-slate-500 transition">
+      ${meta.label} <span class="text-slate-500">${n}</span>
+    </button>`;
+  }).join("");
+  wrap.querySelectorAll(".midia-chip").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const t = btn.dataset.midia;
+      if (state.filters.midias.has(t)) {
+        state.filters.midias.delete(t);
+        btn.classList.remove("bg-indigo-600", "border-indigo-500", "text-white");
+        btn.classList.add("bg-slate-950");
+      } else {
+        state.filters.midias.add(t);
         btn.classList.add("bg-indigo-600", "border-indigo-500", "text-white");
         btn.classList.remove("bg-slate-950");
       }
@@ -562,7 +614,7 @@ function hasActivePlatformFilter() {
 }
 
 function hasActiveObraFilter() {
-  return state.filters.plataformas.size > 0 || !!state.filters.titulo;
+  return state.filters.plataformas.size > 0 || !!state.filters.titulo || state.filters.midias.size > 0;
 }
 
 function getSelectedPlatformIds() {
@@ -573,7 +625,7 @@ function getSelectedPlatformIds() {
   return ids;
 }
 
-function getFilteredObraIds(produtoraId, selectedPlatIds, tituloQuery) {
+function getFilteredObraIds(produtoraId, selectedPlatIds, tituloQuery, selectedMidias) {
   let all = state.obrasPorProdutora.get(produtoraId) || [];
   if (selectedPlatIds && selectedPlatIds.size > 0) {
     all = all.filter(oid => {
@@ -589,11 +641,20 @@ function getFilteredObraIds(produtoraId, selectedPlatIds, tituloQuery) {
              (o.titulo_original || "").toLowerCase().includes(tituloQuery);
     });
   }
+  if (selectedMidias && selectedMidias.size > 0) {
+    all = all.filter(oid => {
+      const o = state.obrasById.get(oid);
+      if (!o) return false;
+      const tm = o.tipo_midia || [];
+      return tm.some(t => selectedMidias.has(t));
+    });
+  }
   return all;
 }
 
 function computeStatsFromObraIds(obraIds) {
   let filmes = 0, series = 0, recentes = 0, inProd = 0, cpb = 0, pipe = 0;
+  let tvAberta = 0, tvPaga = 0, cinema = 0, streamingCnt = 0;
   for (const oid of obraIds) {
     const o = state.obrasById.get(oid);
     if (!o) continue;
@@ -602,8 +663,13 @@ function computeStatsFromObraIds(obraIds) {
     if ((o.ano_lancamento || 0) >= 2023) recentes++;
     if (o.ancine_cpb) cpb++;
     if (o.is_upcoming) pipe++;
+    const tm = o.tipo_midia || [];
+    if (tm.includes("tv_aberta")) tvAberta++;
+    if (tm.includes("tv_paga")) tvPaga++;
+    if (tm.includes("cinema")) cinema++;
+    if (tm.includes("streaming")) streamingCnt++;
   }
-  return { total: obraIds.length, filmes, series, recentes, inProd, cpb, pipe };
+  return { total: obraIds.length, filmes, series, recentes, inProd, cpb, pipe, tvAberta, tvPaga, cinema, streamingCnt };
 }
 
 // =========================================================================
@@ -660,6 +726,19 @@ function applyFilters() {
   // só com pipeline futuro
   if (state.filters.soPipe) {
     arr = arr.filter(p => (p.qtd_pipeline || 0) > 0);
+  }
+
+  // tipo de mídia: produtora passa se tem ao menos 1 obra do tipo escolhido
+  if (state.filters.midias.size > 0) {
+    arr = arr.filter(p => {
+      const obraIds = state.obrasPorProdutora.get(p.id) || [];
+      return obraIds.some(oid => {
+        const o = state.obrasById.get(oid);
+        if (!o) return false;
+        const tm = o.tipo_midia || [];
+        return tm.some(t => state.filters.midias.has(t));
+      });
+    });
   }
 
   // busca por título de obra: mantém produtoras com pelo menos 1 obra que casa
@@ -719,15 +798,18 @@ function render() {
   const visible = arr.slice(0, state.visibleCount);
   const selPlatIds = hasActivePlatformFilter() ? getSelectedPlatformIds() : null;
   const tituloQuery = state.filters.titulo || "";
+  const selMidias = state.filters.midias.size > 0 ? state.filters.midias : null;
   const platLabel = selPlatIds ? [...state.filters.plataformas].join(", ") : "";
+  const midiaLabel = selMidias ? [...selMidias].map(t => MIDIA_META[t]?.label || t).join(", ") : "";
   const grid = document.getElementById("produtoras-grid");
-  grid.innerHTML = visible.map(p => cardHTML(p, selPlatIds, platLabel, tituloQuery)).join("");
+  grid.innerHTML = visible.map(p => cardHTML(p, selPlatIds, platLabel, tituloQuery, selMidias, midiaLabel)).join("");
   // bind clicks
   grid.querySelectorAll("[data-pid]").forEach(el => {
     el.addEventListener("click", () => openModal(parseInt(el.dataset.pid, 10)));
   });
   const ctxParts = [];
   if (platLabel) ctxParts.push(`plataforma(s): ${platLabel}`);
+  if (midiaLabel) ctxParts.push(`tipo: ${midiaLabel}`);
   if (tituloQuery) ctxParts.push(`título contém "${escapeHTML(tituloQuery)}"`);
   const ctxNote = ctxParts.length ? ` <span class="text-indigo-300">(escopo: ${ctxParts.join(" · ")})</span>` : "";
   document.getElementById("results-count").innerHTML = total === 0
@@ -763,20 +845,21 @@ function hotBadge(score) {
   return "";
 }
 
-function cardHTML(p, selPlatIds, platLabel, tituloQuery) {
+function cardHTML(p, selPlatIds, platLabel, tituloQuery, selMidias, midiaLabel) {
   const plats = (p.plataformas_atuantes || []).slice(0, 5);
   const restantes = (p.plataformas_atuantes || []).length - plats.length;
   const localStr = [p.cidade, p.uf].filter(Boolean).join("/");
   const cnpjStr = p.cnpj ? formatCNPJ(p.cnpj) : "";
   const telLink = p.telefone ? `<a href="tel:${(p.telefone || "").replace(/\D/g, '')}" onclick="event.stopPropagation()" class="text-emerald-300 hover:text-emerald-200">📞 ${escapeHTML(p.telefone)}</a>` : "";
 
-  // Stats: filtradas se houver filtro de plataforma ou de titulo
-  const hasObraFilter = (selPlatIds && selPlatIds.size > 0) || tituloQuery;
+  // Stats: filtradas se houver filtro de plataforma, titulo ou midia
+  const hasObraFilter = (selPlatIds && selPlatIds.size > 0) || tituloQuery || (selMidias && selMidias.size > 0);
   let stats, scopeNote;
   if (hasObraFilter) {
-    stats = computeStatsFromObraIds(getFilteredObraIds(p.id, selPlatIds, tituloQuery));
+    stats = computeStatsFromObraIds(getFilteredObraIds(p.id, selPlatIds, tituloQuery, selMidias));
     const parts = [];
     if (platLabel) parts.push(`plataforma(s): ${escapeHTML(platLabel)}`);
+    if (midiaLabel) parts.push(`tipo: ${escapeHTML(midiaLabel)}`);
     if (tituloQuery) parts.push(`título contém "${escapeHTML(tituloQuery)}"`);
     scopeNote = `<div class="text-[10px] text-indigo-300/80 mb-1">escopo: ${parts.join(" · ")}</div>`;
   } else {
@@ -787,9 +870,18 @@ function cardHTML(p, selPlatIds, platLabel, tituloQuery) {
       inProd: p.qtd_in_production || 0,
       cpb: p.qtd_obras_com_cpb || 0,
       pipe: p.qtd_pipeline || 0,
+      tvAberta: p.qtd_tv_aberta || 0,
+      tvPaga: p.qtd_tv_paga || 0,
+      cinema: p.qtd_cinema || 0,
     };
     scopeNote = "";
   }
+
+  // Badges de tipo de mídia que a produtora cobre
+  const midiaBadges = [];
+  if (stats.tvAberta) midiaBadges.push(`<span class="badge ${MIDIA_META.tv_aberta.cls} border" title="${stats.tvAberta} em TV aberta">${MIDIA_META.tv_aberta.label} ${stats.tvAberta}</span>`);
+  if (stats.tvPaga)   midiaBadges.push(`<span class="badge ${MIDIA_META.tv_paga.cls} border" title="${stats.tvPaga} em TV paga">${MIDIA_META.tv_paga.label} ${stats.tvPaga}</span>`);
+  if (stats.cinema)   midiaBadges.push(`<span class="badge ${MIDIA_META.cinema.cls} border" title="${stats.cinema} em cinema">${MIDIA_META.cinema.label} ${stats.cinema}</span>`);
 
   return `
     <div data-pid="${p.id}" class="card-hover bg-slate-900 border border-slate-800 rounded-xl p-5">
@@ -818,6 +910,7 @@ function cardHTML(p, selPlatIds, platLabel, tituloQuery) {
         ${stats.inProd ? `<span class="text-orange-300">🔥 <b>${stats.inProd}</b> em produção</span>` : ""}
         ${stats.pipe ? `<span class="text-purple-300">🔮 <b>${stats.pipe}</b> pipeline</span>` : ""}
       </div>
+      ${midiaBadges.length ? `<div class="flex flex-wrap gap-1 mb-2">${midiaBadges.join("")}</div>` : ""}
       ${(telLink || cnpjStr || p.responsavel) ? `<div class="flex items-center gap-3 text-xs mb-2">
         ${telLink}
         ${cnpjStr ? `<span class="text-slate-500" title="CNPJ">${cnpjStr}</span>` : ""}
@@ -848,11 +941,13 @@ function openModal(pid) {
   if (!p) return;
   const selPlatIds = hasActivePlatformFilter() ? getSelectedPlatformIds() : null;
   const tituloQuery = state.filters.titulo || "";
+  const selMidias = state.filters.midias.size > 0 ? state.filters.midias : null;
   const parts = [];
   if (selPlatIds) parts.push(`plataforma(s): ${[...state.filters.plataformas].join(", ")}`);
+  if (selMidias)  parts.push(`tipo: ${[...selMidias].map(t => MIDIA_META[t]?.label || t).join(", ")}`);
   if (tituloQuery) parts.push(`título contém "${tituloQuery}"`);
   const filterLabel = parts.join(" · ");
-  const obraIds = getFilteredObraIds(pid, selPlatIds, tituloQuery);
+  const obraIds = getFilteredObraIds(pid, selPlatIds, tituloQuery, selMidias);
   const obras = obraIds.map(oid => state.obrasById.get(oid)).filter(Boolean)
     .sort((a, b) => (b.ano_lancamento || 0) - (a.ano_lancamento || 0));
   const obrasTotaisProdutora = (state.obrasPorProdutora.get(pid) || []).length;
@@ -1057,6 +1152,10 @@ function obraRowHTML(o, produtora) {
   const platIds = state.plataformasPorObra.get(o.id) || [];
   const platNomes = platIds.map(pid => state.plataformasById.get(pid)?.nome).filter(Boolean);
   const cpbBadge = o.ancine_cpb ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30" title="CPB Ancine: ${escapeHTML(o.ancine_cpb)}">✅ CPB</span>` : "";
+  const tmBadges = (o.tipo_midia || []).map(t => {
+    const m = MIDIA_META[t];
+    return m ? `<span class="text-[10px] px-1.5 py-0.5 rounded ${m.cls} border" title="${t}">${m.label}</span>` : "";
+  }).join("");
 
   // Moskit: ja enviado?
   const moskitKey = produtora ? `${produtora.id}|${o.id}` : null;
@@ -1084,6 +1183,7 @@ function obraRowHTML(o, produtora) {
         </div>
         <div class="text-xs text-slate-400 mt-0.5">${o.ano_lancamento || "?"}${o.is_upcoming ? ` <span class="text-purple-300">• 🔮 pipeline</span>` : ""}${o.tipo === "serie" && o.in_production ? " • 🔥 em produção" : ""}${o.tipo === "serie" && o.qtd_temporadas ? ` • ${o.qtd_temporadas}T ${o.qtd_episodios || "?"}ep` : ""}</div>
         <div class="flex flex-wrap gap-1 mt-1">
+          ${tmBadges}
           ${cpbBadge}
           ${platNomes.slice(0, 4).map(n => `<span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700">${escapeHTML(n)}</span>`).join("")}
         </div>
